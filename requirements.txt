@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+jinja2
+pydantic
+uuid
+passlib
+starlette
+bcrypt
+python-multipart
