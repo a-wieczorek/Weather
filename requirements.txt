@@ -9,3 +9,4 @@ starlette
 bcrypt
 python-multipart
 gunicorn
+aiofiles
