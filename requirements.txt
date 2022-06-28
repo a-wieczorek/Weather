@@ -8,3 +8,4 @@ passlib
 starlette
 bcrypt
 python-multipart
+gunicorn
