@@ -1,3 +1,4 @@
+import sqlite3
 from typing import Optional
 import uvicorn
 import requests
