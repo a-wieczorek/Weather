@@ -1,7 +1,8 @@
 import sqlite3
-from typing import Optional
+import redis
 import uvicorn
 import requests
+from typing import Optional
 from fastapi import FastAPI, Request, Form, status, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse
@@ -12,14 +13,15 @@ from pydantic import BaseModel
 from uuid import uuid4
 from passlib.context import CryptContext
 
+
 # Users
 #     values('uep', 'loveuep')
 #     values('burak', 'ziemniak')
 
-TOKENS = []
+r = redis.Redis(decode_responses=True, host="172.17.0.2")
 
 app = FastAPI()
-app.mount("/pics", StaticFiles(directory="pics"), name="pics")
+app.mount("/pics", StaticFiles(directory="./pics"), name="pics")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -38,13 +40,17 @@ class UserAuthorization:
         token = request.cookies.get("token")
         if not token:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Najpierw się zaloguj")
-        token_in_base = False
-        for i in range(len(TOKENS)):
-            if token in TOKENS[i]:
-                token_in_base = True
-        if not token_in_base:
+        if not r.get(token):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Najpierw się zaloguj")
         pass
+
+        #token_in_base = False
+        #for i in range(len(TOKENS)):
+        #    if token in TOKENS[i]:
+        #        token_in_base = True
+        #if not token_in_base:
+        #    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Najpierw się zaloguj")
+        #pass
 
 
 class User(BaseModel):
@@ -112,14 +118,15 @@ async def weather(request: Request, city: str = 'Poznań', not_found: bool = Fal
 
 
 def change_default(city, token):
-    user = UserInDB
-    for i in range(len(TOKENS)):
-        if token in TOKENS[i]:
-            user = TOKENS[i][1]
-    cur = CONN.cursor()
-    cur.execute(f"UPDATE users SET city = '{city}' WHERE username = '{user.username}'")
-    CONN.commit()
-    pass
+    #for i in range(len(TOKENS)):
+    #    if token in TOKENS[i]:
+    #        user = TOKENS[i][1]
+    x = r.get(token)
+    if r.get(x):
+        cur = CONN.cursor()
+        cur.execute(f"UPDATE users SET city = '{city}' WHERE username = '{x}'")
+        CONN.commit()
+        pass
 
 
 @app.post("/weather", dependencies=[Depends(UserAuthorization())])
@@ -149,7 +156,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     response = RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
     x = str(uuid4())
     response.set_cookie("token", value=x)
-    TOKENS.append([x, user])
+    r.set(x, user.username, ex=3600)
+    #TOKENS.append([x, user])
     return response
 
 
