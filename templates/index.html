@@ -45,11 +45,16 @@
                 <label for="passwordLabel">Password</label>
                 <input name="password" type="password" class="form-control" id="passwordLabel" aria-describedby="wrong_cred" placeholder="Password" required/>
                 {% if wrong_cred %}
-                <small id="wrong_cred" class="form-text">Login lub hasło są nieprawidłowe</small>
+                <small id="wrong_cred" class="form-text">Incorrect Login or password</small>
+                {% endif %}
+                {% if user_exists %}
+                <small id="wrong_cred" class="form-text">User with that Login already exists</small>
                 {% endif %}
             </div>
             <br/><br/>
-            <input class="btn btn-light" type="submit" value="Submit">
+            <input class="btn btn-light" type="submit" value="Log in">
+            <br/><br/>
+            <input class="btn btn-light" type="submit" value="Register and log in" formaction="/register">
         </form>
         <br/>
     </div>

@@ -2,6 +2,7 @@ import sqlite3
 import redis
 import uvicorn
 import requests
+import psycopg2
 from typing import Optional
 from fastapi import FastAPI, Request, Form, status, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -12,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from uuid import uuid4
 from passlib.context import CryptContext
-import psycopg2
+
 
 r = redis.Redis(decode_responses=True, host="redis")
 #r = redis.Redis(decode_responses=True, host="localhost")
@@ -88,7 +89,7 @@ def create_connection(db_file):
 def select_user(username):
     CONN = establish_connection()
     cur = CONN.cursor()
-    cur.execute(f"SELECT * FROM users WHERE username='{username}'")
+    cur.execute(f"SELECT * FROM users WHERE LOWER(username)=LOWER('{username}')")
     row = cur.fetchall()
     if len(row) > 0:
         user_dict = {
@@ -104,8 +105,8 @@ def select_user(username):
 
 def get_weather(city):
     city_call = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid=adf0fda1db34d68d7073d8d88749962c'
-    r = requests.get(city_call)
-    weather_json = r.json()
+    req = requests.get(city_call)
+    weather_json = req.json()
     weather_type = weather_json['weather'][0]['main']
     humidity = weather_json['main']['humidity']
     pressure = weather_json['main']['pressure']
@@ -116,8 +117,8 @@ def get_weather(city):
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request, wrong_cred: bool = False):
-    x = templates.TemplateResponse("index.html", {"request": request, "wrong_cred": wrong_cred})
+async def root(request: Request, wrong_cred: bool = False, user_exists: bool = False):
+    x = templates.TemplateResponse("index.html", {"request": request, "wrong_cred": wrong_cred, "user_exists": user_exists})
     return x
 
 
@@ -169,9 +170,28 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     x = str(uuid4())
     response.set_cookie("token", value=x)
     r.set(x, user.username, ex=3600)
-    #TOKENS.append([x, user])
     return response
 
+
+@app.post("/register")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = select_user(form_data.username)
+    if user:
+        response = RedirectResponse(url='/?user_exists=true', status_code=status.HTTP_302_FOUND)
+        return response
+
+    CONN = establish_connection()
+    cur = CONN.cursor()
+    cur.execute(f"INSERT INTO users VALUES ('{form_data.username}', '{pwd_context.hash(form_data.password)}')")
+    CONN.commit()
+    CONN.close()
+
+    url = f'/weather/'
+    response = RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+    x = str(uuid4())
+    response.set_cookie("token", value=x)
+    r.set(x, form_data.username, ex=3600)
+    return response
 
 @app.post("/logout")
 async def logout(request: Request):
