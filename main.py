@@ -12,13 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from uuid import uuid4
 from passlib.context import CryptContext
+import psycopg2
 
-
-# Users
-#     values('uep', 'loveuep')
-#     values('burak', 'ziemniak')
-
-r = redis.Redis(decode_responses=True, host="172.17.0.2")
+r = redis.Redis(decode_responses=True, host="redis")
+#r = redis.Redis(decode_responses=True, host="localhost")
 
 app = FastAPI()
 app.mount("/pics", StaticFiles(directory="./pics"), name="pics")
@@ -29,10 +26,11 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 templates = Jinja2Templates(directory="templates")
 
-print(pwd_context.hash('loveuep'))
-print(pwd_context.hash('ziemniak'))
-
-# uvicorn main:app --reload
+#CONN = create_connection('users.sqlite')
+#print(pwd_context.hash('loveuep'))
+#print(pwd_context.hash('ziemniak'))
+#$2b$12$C.pbDgKKhPN2Bg6/dl.oxu78WCqlTps6KkqjY3JrTFC6myY5uL8UK
+#$2b$12$8D2QVUNZTdKhSrXdeGoWS.xN7zI/bP3NXbuzDv/5YmGEdz//uXy.e
 
 
 class UserAuthorization:
@@ -62,6 +60,22 @@ class UserInDB(User):
     hashed_password: str
 
 
+def establish_connection():
+    db_name = 'database'
+    db_user = 'user'
+    db_pass = 'secret'
+    db_host = 'db'
+    db_port = '5432'
+    conn = psycopg2.connect(
+        dbname=db_name,
+        user=db_user,
+        host=db_host,
+        password=db_pass,
+        port=db_port
+    )
+    return conn
+
+
 def create_connection(db_file):
     conn = None
     try:
@@ -71,10 +85,8 @@ def create_connection(db_file):
     return conn
 
 
-CONN = create_connection('users.sqlite')
-
-
 def select_user(username):
+    CONN = establish_connection()
     cur = CONN.cursor()
     cur.execute(f"SELECT * FROM users WHERE username='{username}'")
     row = cur.fetchall()
@@ -86,6 +98,7 @@ def select_user(username):
         }
         user = UserInDB(**user_dict)
         return user
+    CONN.close()
     return None
 
 
@@ -118,14 +131,13 @@ async def weather(request: Request, city: str = 'Poznań', not_found: bool = Fal
 
 
 def change_default(city, token):
-    #for i in range(len(TOKENS)):
-    #    if token in TOKENS[i]:
-    #        user = TOKENS[i][1]
     x = r.get(token)
-    if r.get(x):
+    if x:
+        CONN = establish_connection()
         cur = CONN.cursor()
         cur.execute(f"UPDATE users SET city = '{city}' WHERE username = '{x}'")
         CONN.commit()
+        CONN.close()
         pass
 
 
@@ -168,5 +180,5 @@ async def logout(request: Request):
     return response
 
 
-#if __name__ == '__main__':
-#    uvicorn.run(app, host='localhost', port=8000)
+if __name__ == '__main__':
+    uvicorn.run(app, host='localhost', port=8000)

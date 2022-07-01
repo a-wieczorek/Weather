@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+  redis:
+    image: "redis:7.0.2-bullseye"
+  db:
+    image: "postgres:14.4"
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: "secret"
+      POSTGRES_USER: "user"
+      POSTGRES_DB: "database"

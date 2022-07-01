@@ -11,3 +11,4 @@ python-multipart
 gunicorn
 aiofiles
 redis~=4.3.4
+psycopg2~=2.9.3
