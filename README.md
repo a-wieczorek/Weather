@@ -3,7 +3,7 @@ The app allows a user to log in or register and check the weather for a chosen c
 
 -**FastApi** - backend
 
--**PostgreSQL** - storing user data (login, hashed password, last visited ('default') city)
+-**PostgreSQL** - storing user data (login, hashed password, last visited (default) city)
 
 -**Redis** - storing *token* (key) and *username* (value) for logged users
 
