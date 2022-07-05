@@ -7,7 +7,7 @@ The app allows a user to log in or register and check the weather for a chosen c
 
 -**Redis** - storing *token* (key) and *username* (value) for logged users
 
-The app is wrapped in **Docker-Compose**.
+The app is wrapped in **Docker-Compose**, using official docker images for *postgreSQL* and *redis* and building a custom container image specified in *Dockerfile**.
 
 ### Functionalities
 -*Log In* - If the login and password (read with **OAuth2PasswordRequestForm**, verified using **PassLib CryptContext**) is found in database using *postgreSQL*, a *token* is created and entered into a *redis* database, with 1h expiry time, along with the user's *username*. Then, it is set as a *cookie* and the user is redirected to the */weather* endpoint where the weather for the last checked city is displayed
