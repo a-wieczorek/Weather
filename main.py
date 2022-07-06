@@ -1,10 +1,10 @@
 import os
-
 import redis
 import sqlalchemy
 import uvicorn
 import requests
 import psycopg2
+from psycopg2.extensions import connection
 from sqlalchemy import create_engine, Column, String
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import sessionmaker
@@ -18,29 +18,24 @@ from uuid import uuid4
 from passlib.context import CryptContext
 from typing import Union
 from dotenv import load_dotenv
-
+from pydantic.dataclasses import dataclass
+from pydantic import BaseModel
 
 load_dotenv()
-r = redis.Redis(decode_responses=True, host="redis")
-#r = redis.Redis(decode_responses=True, host="localhost")
+r = redis.Redis(decode_responses=True, host=os.getenv('redis_host'))
 app = FastAPI()
 app.mount("/pics", StaticFiles(directory="./pics"), name="pics")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 templates = Jinja2Templates(directory="templates")
 
 
-def connect():
-    db_name = 'database'
-    db_user = 'user'
-    db_pass = 'secret'
-    db_host = 'db'
-    db_port = '5432'
+def connect() -> psycopg2.extensions.connection:
     return psycopg2.connect(
-        dbname=db_name,
-        user=db_user,
-        host=db_host,
-        password=db_pass,
-        port=db_port
+        dbname=os.getenv('db_name'),
+        user=os.getenv('db_user'),
+        host=os.getenv('db_host'),
+        password=os.getenv('db_password'),
+        port='5432'
     )
 
 
@@ -57,6 +52,21 @@ class User(base):
 engine = sqlalchemy.create_engine('postgresql+psycopg2://', creator=connect)
 base.prepare(autoload_with=engine)
 Session = sessionmaker(engine)
+
+
+@dataclass
+class WeatherData(BaseModel):
+    weather: list
+    main: dict
+    name: str
+
+    @property
+    def info(self) -> list:
+        temp_c = round(self.main['temp'] - 273.15, 2)
+        return[self.weather[0]['main'], self.main['humidity'], self.main['pressure'], temp_c, self.name]
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class UserAuthorization:
@@ -77,35 +87,29 @@ def select_user(username) -> Union[sqlalchemy.orm.query.Query, None]:
     return None
 
 
-def get_weather(city):
+def get_weather(city) -> list:
     city_call = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={os.getenv("appid")}'
     req = requests.get(city_call)
-    weather_json = req.json()
-    weather_type = weather_json['weather'][0]['main']
-    humidity = weather_json['main']['humidity']
-    pressure = weather_json['main']['pressure']
-    temp_k = weather_json['main']['temp']
-    temp_c = round(temp_k - 273.15, 2)
-    name = weather_json['name']
-    return weather_type, humidity, pressure, temp_c, name
+    weather_data = WeatherData.parse_obj(req.json())
+    return weather_data.info
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request, wrong_cred: bool = False, user_exists: bool = False):
+async def root(request: Request, wrong_cred: bool = False, user_exists: bool = False) -> Jinja2Templates.TemplateResponse:
     x = templates.TemplateResponse("index.html", {"request": request, "wrong_cred": wrong_cred, "user_exists": user_exists})
     return x
 
 
 @app.get("/weather", response_class=HTMLResponse, dependencies=[Depends(UserAuthorization())])
-async def weather(request: Request, city: str = 'Poznań', not_found: bool = False):
-    weather_type, humidity, pressure, temp, name = get_weather(city)
-    dic = {"request": request, "weather_type": weather_type, 'temp': temp, "humidity": humidity, "pressure": pressure,
-           "city": name, "not_found": not_found}
+async def weather(request: Request, city: str = 'Poznań', not_found: bool = False) -> Jinja2Templates.TemplateResponse:
+    weather_info = get_weather(city)
+    dic = {"request": request, "weather_type": weather_info[0], "humidity": weather_info[1], "pressure": weather_info[2],
+           'temp': weather_info[3], "city": weather_info[4], "not_found": not_found}
     x = templates.TemplateResponse("weather.html", dic)
     return x
 
 
-def change_default(city, token):
+def change_default(city, token) -> None:
     username = r.get(token)
     if username:
         with Session() as session:
@@ -115,7 +119,7 @@ def change_default(city, token):
 
 
 @app.post("/weather", dependencies=[Depends(UserAuthorization())])
-async def change_city(request: Request, city: str = Form(...), old_city: str = Form(...)):
+async def change_city(request: Request, city: str = Form(...), old_city: str = Form(...)) -> RedirectResponse:
     city_call = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid=adf0fda1db34d68d7073d8d88749962c'
     response = requests.get(city_call)
     try:
@@ -129,7 +133,7 @@ async def change_city(request: Request, city: str = Form(...), old_city: str = F
 
 
 @app.post("/token")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> RedirectResponse:
     user = select_user(form_data.username)
     if user is None:
         response = RedirectResponse(url='/?wrong_cred=true', status_code=status.HTTP_302_FOUND)
@@ -146,7 +150,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 
 @app.post("/register")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> RedirectResponse:
     user = select_user(form_data.username)
     if user:
         response = RedirectResponse(url='/?user_exists=true', status_code=status.HTTP_302_FOUND)
@@ -163,11 +167,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 
 @app.post("/logout")
-async def logout(request: Request):
+async def logout(request: Request) -> RedirectResponse:
     response = RedirectResponse(url='/', status_code=status.HTTP_302_FOUND)
     response.set_cookie("token", value='0', expires=1)
     return response
 
 
 if __name__ == '__main__':
-    uvicorn.run(app, host='localhost', port=8000)
+    uvicorn.run(app, host='localhost', port=3000)
