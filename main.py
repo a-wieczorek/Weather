@@ -1,37 +1,62 @@
-import sqlite3
+import os
+
 import redis
+import sqlalchemy
 import uvicorn
 import requests
 import psycopg2
-from typing import Optional
+from sqlalchemy import create_engine, Column, String
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.orm import sessionmaker
 from fastapi import FastAPI, Request, Form, status, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from uuid import uuid4
 from passlib.context import CryptContext
+from typing import Union
+from dotenv import load_dotenv
 
 
+load_dotenv()
 r = redis.Redis(decode_responses=True, host="redis")
 #r = redis.Redis(decode_responses=True, host="localhost")
-
 app = FastAPI()
 app.mount("/pics", StaticFiles(directory="./pics"), name="pics")
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 templates = Jinja2Templates(directory="templates")
 
-#CONN = create_connection('users.sqlite')
-#print(pwd_context.hash('loveuep'))
-#print(pwd_context.hash('ziemniak'))
-#$2b$12$C.pbDgKKhPN2Bg6/dl.oxu78WCqlTps6KkqjY3JrTFC6myY5uL8UK
-#$2b$12$8D2QVUNZTdKhSrXdeGoWS.xN7zI/bP3NXbuzDv/5YmGEdz//uXy.e
+
+def connect():
+    db_name = 'database'
+    db_user = 'user'
+    db_pass = 'secret'
+    db_host = 'db'
+    db_port = '5432'
+    return psycopg2.connect(
+        dbname=db_name,
+        user=db_user,
+        host=db_host,
+        password=db_pass,
+        port=db_port
+    )
+
+
+base = automap_base()
+class User(base):
+    __tablename__ = 'users'
+    __table_args__ = {'extend_existing': True}
+
+    username = Column(String, primary_key=True)
+    hashed_password = Column(String)
+    city = Column(String)
+
+
+engine = sqlalchemy.create_engine('postgresql+psycopg2://', creator=connect)
+base.prepare(autoload_with=engine)
+Session = sessionmaker(engine)
 
 
 class UserAuthorization:
@@ -43,68 +68,17 @@ class UserAuthorization:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Najpierw się zaloguj")
         pass
 
-        #token_in_base = False
-        #for i in range(len(TOKENS)):
-        #    if token in TOKENS[i]:
-        #        token_in_base = True
-        #if not token_in_base:
-        #    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Najpierw się zaloguj")
-        #pass
 
-
-class User(BaseModel):
-    username: str
-    city: Optional[str] = None
-
-
-class UserInDB(User):
-    hashed_password: str
-
-
-def establish_connection():
-    db_name = 'database'
-    db_user = 'user'
-    db_pass = 'secret'
-    db_host = 'db'
-    db_port = '5432'
-    conn = psycopg2.connect(
-        dbname=db_name,
-        user=db_user,
-        host=db_host,
-        password=db_pass,
-        port=db_port
-    )
-    return conn
-
-
-def create_connection(db_file):
-    conn = None
-    try:
-        conn = sqlite3.connect(db_file)
-    except Exception as e:
-        print(e)
-    return conn
-
-
-def select_user(username):
-    CONN = establish_connection()
-    cur = CONN.cursor()
-    cur.execute(f"SELECT * FROM users WHERE LOWER(username)=LOWER('{username}')")
-    row = cur.fetchall()
-    if len(row) > 0:
-        user_dict = {
-            "username": row[0][0],
-            "hashed_password": row[0][1],
-            "city": row[0][2],
-        }
-        user = UserInDB(**user_dict)
-        return user
-    CONN.close()
+def select_user(username) -> Union[sqlalchemy.orm.query.Query, None]:
+    with Session() as session:
+        user = session.query(User).filter_by(username=username)
+    if user.count() == 1:
+        return user[0]
     return None
 
 
 def get_weather(city):
-    city_call = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid=adf0fda1db34d68d7073d8d88749962c'
+    city_call = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={os.getenv("appid")}'
     req = requests.get(city_call)
     weather_json = req.json()
     weather_type = weather_json['weather'][0]['main']
@@ -132,14 +106,12 @@ async def weather(request: Request, city: str = 'Poznań', not_found: bool = Fal
 
 
 def change_default(city, token):
-    x = r.get(token)
-    if x:
-        CONN = establish_connection()
-        cur = CONN.cursor()
-        cur.execute(f"UPDATE users SET city = '{city}' WHERE username = '{x}'")
-        CONN.commit()
-        CONN.close()
-        pass
+    username = r.get(token)
+    if username:
+        with Session() as session:
+            session.query(User).filter_by(username=username).update({User.city: city})
+            session.commit()
+    pass
 
 
 @app.post("/weather", dependencies=[Depends(UserAuthorization())])
@@ -179,19 +151,16 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if user:
         response = RedirectResponse(url='/?user_exists=true', status_code=status.HTTP_302_FOUND)
         return response
-
-    CONN = establish_connection()
-    cur = CONN.cursor()
-    cur.execute(f"INSERT INTO users VALUES ('{form_data.username}', '{pwd_context.hash(form_data.password)}')")
-    CONN.commit()
-    CONN.close()
-
+    with Session() as session:
+        session.add(User(username=form_data.username, hashed_password=pwd_context.hash(form_data.password)))
+        session.commit()
     url = f'/weather/'
     response = RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
     x = str(uuid4())
     response.set_cookie("token", value=x)
     r.set(x, form_data.username, ex=3600)
     return response
+
 
 @app.post("/logout")
 async def logout(request: Request):
