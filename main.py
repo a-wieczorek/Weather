@@ -1,13 +1,13 @@
 import os
 import redis
-import sqlalchemy
 import uvicorn
 import requests
 import psycopg2
 from psycopg2.extensions import connection
-from sqlalchemy import create_engine, Column, String
+from sqlalchemy import create_engine, Column, String, Table, MetaData
 from sqlalchemy.ext.automap import automap_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.orm import sessionmaker, Query
 from fastapi import FastAPI, Request, Form, status, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse
@@ -18,7 +18,6 @@ from uuid import uuid4
 from passlib.context import CryptContext
 from typing import Union, List
 from dotenv import load_dotenv
-from pydantic.dataclasses import dataclass
 from pydantic import BaseModel
 
 load_dotenv()
@@ -29,7 +28,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 templates = Jinja2Templates(directory="templates")
 
 
-def connect() -> psycopg2.extensions.connection:
+def connect_to_db() -> psycopg2.extensions.connection:
     return psycopg2.connect(
         dbname=os.getenv('db_name'),
         user=os.getenv('db_user'),
@@ -49,9 +48,20 @@ class User(base):
     city = Column(String)
 
 
-engine = sqlalchemy.create_engine('postgresql+psycopg2://', creator=connect)
+engine = create_engine('postgresql+psycopg2://', creator=connect_to_db)
 base.prepare(autoload_with=engine)
 Session = sessionmaker(engine)
+
+meta = MetaData(engine)
+users_table = Table('users', meta,
+                       Column('username', String),
+                       Column('hashed_password', String),
+                       Column('city', String))
+try:
+    users_table.create()
+    print('Table created')
+except ProgrammingError as e:
+    print('Existing table loaded')
 
 
 class WeatherData(BaseModel):
@@ -76,19 +86,17 @@ class UserAuthorization:
         pass
 
 
-def select_user(username) -> Union[sqlalchemy.orm.query.Query, None]:
+def select_user(username: str) -> Union[Query, None]:
     with Session() as session:
-        user = session.query(User).filter_by(username=username)
+        user = session.query(User).filter_by(username=username.lower())
     if user.count() == 1:
         return user[0]
     return None
 
 
-def get_weather(city) -> List[str]:
+def get_weather_info(city: str) -> List[str]:
     city_call = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={os.getenv("appid")}'
-
     req = requests.get(city_call)
-    #weather_data = WeatherData.parse_obj(req.json())
     weather_data = WeatherData(**req.json())
     return weather_data.info
 
@@ -101,14 +109,14 @@ async def root(request: Request, wrong_cred: bool = False, user_exists: bool = F
 
 @app.get("/weather", response_class=HTMLResponse, dependencies=[Depends(UserAuthorization())])
 async def weather(request: Request, city: str = 'Poznań', not_found: bool = False) -> Jinja2Templates.TemplateResponse:
-    weather_info = get_weather(city)
+    weather_info = get_weather_info(city)
     dic = {"request": request, "weather_type": weather_info[0], "humidity": weather_info[1], "pressure": weather_info[2],
            'temp': weather_info[3], "city": weather_info[4], "not_found": not_found}
     x = templates.TemplateResponse("weather.html", dic)
     return x
 
 
-def change_default(city, token) -> None:
+def change_last_visited(city: str, token: str) -> None:
     username = r.get(token)
     if username:
         with Session() as session:
@@ -124,7 +132,7 @@ async def change_city(request: Request, city: str = Form(...), old_city: str = F
     try:
         response.raise_for_status()
         response = RedirectResponse(url=f'/weather/?city={city}', status_code=status.HTTP_302_FOUND)
-        change_default(city, request.cookies.get("token"))
+        change_last_visited(city, request.cookies.get("token"))
         return response
     except requests.exceptions.HTTPError:
         response = RedirectResponse(url=f'/weather/?city={old_city}&not_found=true', status_code=status.HTTP_302_FOUND)
@@ -155,7 +163,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> RedirectRes
         response = RedirectResponse(url='/?user_exists=true', status_code=status.HTTP_302_FOUND)
         return response
     with Session() as session:
-        session.add(User(username=form_data.username, hashed_password=pwd_context.hash(form_data.password)))
+        session.add(User(username=form_data.username.lower(), hashed_password=pwd_context.hash(form_data.password)))
         session.commit()
     url = f'/weather/'
     response = RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
