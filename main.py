@@ -16,7 +16,7 @@ from starlette.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from uuid import uuid4
 from passlib.context import CryptContext
-from typing import Union
+from typing import Union, List
 from dotenv import load_dotenv
 from pydantic.dataclasses import dataclass
 from pydantic import BaseModel
@@ -54,19 +54,16 @@ base.prepare(autoload_with=engine)
 Session = sessionmaker(engine)
 
 
-@dataclass
 class WeatherData(BaseModel):
     weather: list
     main: dict
     name: str
 
     @property
-    def info(self) -> list:
+    def info(self) -> List[str]:
         temp_c = round(self.main['temp'] - 273.15, 2)
-        return[self.weather[0]['main'], self.main['humidity'], self.main['pressure'], temp_c, self.name]
-
-    class Config:
-        allow_population_by_field_name = True
+        result = [self.weather[0]['main'], self.main['humidity'], self.main['pressure'], temp_c, self.name]
+        return [str(inf) for inf in result]
 
 
 class UserAuthorization:
@@ -87,10 +84,12 @@ def select_user(username) -> Union[sqlalchemy.orm.query.Query, None]:
     return None
 
 
-def get_weather(city) -> list:
+def get_weather(city) -> List[str]:
     city_call = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={os.getenv("appid")}'
+
     req = requests.get(city_call)
-    weather_data = WeatherData.parse_obj(req.json())
+    #weather_data = WeatherData.parse_obj(req.json())
+    weather_data = WeatherData(**req.json())
     return weather_data.info
 
 
