@@ -18,4 +18,4 @@ The app is wrapped in **Docker-Compose**, using official docker images for *post
 
 -*Check Weather* - A logged user can access the */weather* endpoint to display the weather, temperature, humidity and pressure for a chosen city. Data is fetched using an OpenWeatherMap API (http://api.openweathermap.org). The user can change the city using a form on the *HTML* page
 
--*Log Out* - Upon clicking the button, user's cookie *token* is deleted and the user is redirected to the root page.
+-*Log Out* - Upon clicking the button, user's cookie *token* is deleted and the user is redirected to the root page (Index.html).
