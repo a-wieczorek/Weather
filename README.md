@@ -12,7 +12,7 @@ The app is wrapped in **Docker-Compose**, using official docker images for *post
 ![obraz](https://user-images.githubusercontent.com/102622810/177599751-bcae634b-9541-43fc-8caa-8094221b0a70.png)
 
 ### Functionalities
--*Log In* - If the login and password (read with **OAuth2PasswordRequestForm**, verified using **PassLib CryptContext**) is found in database using *postgreSQL*, a *token* is created and entered into a *redis* database, with 1h expiry time, along with the user's *username*. Then, it is set as a *cookie* and the user is redirected to the */weather* endpoint where the weather for the last checked city is displayed
+-*Log In* - If the login and password (read with **OAuth2PasswordRequestForm**, verified using **PassLib CryptContext**) is found in *postgreSQL* database using *SQLAlchemy ORM session* , a *token* is created and entered into a *redis* database, with 1h expiry time, along with the user's *username*. Then, the token is set as a *cookie* and the user is redirected to the */weather* endpoint where the weather for the last checked city is displayed
 
 -*Register* - If the entered login is not found in *postgreSQL* database, a new user is created and the user is logged in analogically with Poznań used as a default city. The password is hashed using *PassLib CryptContext* before insertion to the *postgreSQL* database
 
